@@ -1,7 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
-const { requestHandlerLogin } = require("./controller/LoginController");
+const { requestHandlerLogin } = require("./controller/loginController");
 const { requestHandlerSendEmail } = require("./controller/emailController");
 const authorsController = require("./controller/authorsController");
 const postsController = require("./controller/postsController");
