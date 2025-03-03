@@ -1,4 +1,5 @@
 function createSlug(title) {
+    if (!title) return;
     const cyrillicToLatinMap = {
         а: "a",
         б: "b",

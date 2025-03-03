@@ -11,11 +11,15 @@ const setNewPost = async (req, res) => {
     const { author, category, content, title, subtitle } = req.body;
     const image = req.file;
 
+    if (!author || !category || !content || !title || !subtitle || !image) {
+        res.status(400).send("All fields required");
+        return;
+    }
+
     const originalImageNameWithoutExtension = image.originalname
         .split(".")
         .slice(0, -1)
         .join("");
-
     const newImageName =
         originalImageNameWithoutExtension +
         Date.now() +
@@ -29,63 +33,39 @@ const setNewPost = async (req, res) => {
         path.join("uploads/posts", newImageName),
         image.buffer,
         (err) => {
-            console.log("erorr", err);
             if (err) {
+                console.log("error", err);
                 return res.status(500).send("Error saving file.");
             }
         }
     );
 
-    await db.collection(POSTS_COLLECTION).insertOne({
-        title: title,
-        subTitle: subtitle,
-        author: {
-            ref: "authors",
-            id: new ObjectId(String(author)),
-        },
-        category: {
-            ref: "categories",
-            id: new ObjectId(String(category)),
-        },
-        content: content,
-        image: newImageName,
-        slug: createSlug(title),
-    });
-    res.status(200).send("Post added");
-
-    ////
-    // Декодируем Base64 и сохраняем файл
-    // const buffer = Buffer.from(image.base64, "base64");
-    // const fileName = Date.now() + `.${image.extension}`; // Генерация уникального имени для файла
-    // console.log("in set 2");
-
-    // fs.writeFile(path.join("uploads/posts", fileName), buffer, (err) => {
-    //     console.log("erorr", err);
-    //     if (err) {
-    //         return res.status(500).send("Error saving file.");
-    //     }
-    //     return {
-    //         message: "File uploaded successfully!",
-    //         filename: fileName,
-    //     };
-    // });
-
-    // const id = await db.collection(POSTS_COLLECTION).insertOne({
-    //     author: {
-    //         ref: "authors",
-    //         id: new ObjectId(String(author)),
-    //     },
-    //     title: title,
-    //     category: {
-    //         ref: "categories",
-    //         id: new ObjectId(String(category)),
-    //     },
-    //     content: content,
-    //     subTitle: subtitle,
-    //     image: fileName,
-    //     slug: createSlug(title),
-    // });
-    // res.status(200).send("Post added");
+    try {
+        await db.collection(POSTS_COLLECTION).insertOne({
+            title: title,
+            subTitle: subtitle,
+            author: {
+                ref: "authors",
+                id: new ObjectId(String(author)),
+            },
+            category: {
+                ref: "categories",
+                id: new ObjectId(String(category)),
+            },
+            content: content,
+            image: newImageName,
+            slug: createSlug(title),
+        });
+        res.status(200).send("Post added");
+    } catch (error) {
+        console.error(`Error while accessing the database: ${error}`);
+        fs.unlink(path.join("uploads/posts", newImageName), (err) => {
+            if (err) console.log("error", err);
+        });
+        res.status(504).send(
+            `Server error, while accessing the database:  ${error}`
+        );
+    }
 };
 
 const getAllPosts = async (req, res) => {
@@ -184,10 +164,10 @@ const getOnePostBySlug = async (req, res) => {
             },
         ]);
         const onePost = await onePostCursor.toArray();
-        if (onePostCursor) {
+        if (onePost.length === 1) {
             res.status(200).json(onePost);
         } else {
-            res.status(404).json({ error: "Not Found" });
+            res.status(404).send("Not Found");
         }
     } catch (error) {
         console.error("Error fetching post by slug:", error);
@@ -199,9 +179,15 @@ const updatePostBySlug = async (req, res) => {
     const { slug } = req.params;
     const { author, category, content, title, subtitle } = req.body;
     const image = req.file;
+    let errorIO = false;
+    const post = await db.collection(POSTS_COLLECTION).findOne({ slug: slug });
+    if (!post) {
+        res.status(404).send("Post with this slug does not exist");
+        return;
+    }
+
     let originalImageNameWithoutExtension;
     let newImageName;
-    const post = await db.collection(POSTS_COLLECTION).findOne({ slug: slug });
     const oldImageNameToDelete = post.image;
 
     if (image) {
@@ -222,43 +208,59 @@ const updatePostBySlug = async (req, res) => {
             path.join("uploads/posts", newImageName),
             image.buffer,
             (err) => {
-                console.log("erorr", err);
                 if (err) {
-                    return res.status(500).send("Error saving file.");
+                    console.log("Error while write file", err);
+                    res.status(500).send("Server error");
+                    errorIO = true;
+                    return;
                 }
             }
         );
-        const filePath = path.join("uploads/posts", oldImageNameToDelete);
-        fs.unlink(filePath, (err) => {
-            console.log("error", err);
+        fs.unlink(path.join("uploads/posts", oldImageNameToDelete), (err) => {
             if (err) {
-                return res.status(500).send("Error deleting file.");
+                errorIO = true;
+                console.log("errorIO!!!", errorIO);
+                console.log("Error while deleting old image", err);
+                res.status(500).send("Server error");
+                fs.unlink(path.join("uploads/posts", newImageName), (err) => {
+                    errorIO = true;
+                    if (err) {
+                        console.log("Error while deleting old image 2", err);
+                    }
+                });
             }
         });
     }
 
     try {
-        const post = await db
-            .collection(POSTS_COLLECTION)
-            .findOne({ slug: slug });
-        if (!post) {
-            return res.status(404).json({ error: "Post not found" });
-        }
+        const updateData = {};
 
-        const updateData = {
-            author: {
+        if (author) {
+            updateData.author = {
                 ref: "authors",
                 id: new ObjectId(String(author)),
-            },
-            title,
-            category: {
+            };
+        }
+
+        if (title) {
+            updateData.title = title;
+            updateData.slug = createSlug(title);
+        }
+
+        if (category) {
+            updateData.category = {
                 ref: "categories",
                 id: new ObjectId(String(category)),
-            },
-            content,
-            subTitle: subtitle,
-            slug: createSlug(title),
-        };
+            };
+        }
+
+        if (content) {
+            updateData.content = content;
+        }
+
+        if (subtitle) {
+            updateData.subTitle = subtitle;
+        }
 
         if (image) {
             updateData.image = newImageName;
@@ -272,7 +274,6 @@ const updatePostBySlug = async (req, res) => {
                 { returnDocument: "after" }
             );
 
-        console.log("updatedPost", updatedPost);
         res.status(200).json(updatedPost.value);
     } catch (error) {
         console.error("Error updating post:", error);
@@ -282,6 +283,7 @@ const updatePostBySlug = async (req, res) => {
 
 const deletePostById = async (req, res) => {
     const { slug } = req.params;
+    // УБРАТЬ АГРЕГАЦИЮ
     const onePostCursor = db.collection(POSTS_COLLECTION).aggregate([
         {
             $match: { slug: slug },
@@ -326,16 +328,20 @@ const deletePostById = async (req, res) => {
     ]);
     const onePost = await onePostCursor.toArray();
     const imageNameToDelete = onePost[0]?.image;
-    const post = await db
-        .collection(POSTS_COLLECTION)
-        .deleteOne({ slug: slug });
+    console.log("onePost", onePost);
+    console.log("imageNameToDelete", imageNameToDelete);
+    console.log("slug", slug);
+
+    // const post = await db
+    //     .collection(POSTS_COLLECTION)
+    //     .deleteOne({ slug: slug });
 
     if (post.deletedCount === 1) {
         console.log("Delete from mongo success");
         const filePath = path.join("uploads/posts", imageNameToDelete);
         fs.unlink(filePath, (err) => {
-            console.log("error", err);
             if (err) {
+                console.log("error", err);
                 return res.status(500).send("Error deleting file.");
             }
         });

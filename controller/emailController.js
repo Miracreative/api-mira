@@ -3,7 +3,6 @@ const nodemailer = require("nodemailer");
 const transporter = nodemailer.createTransport({
     host: "sandbox.smtp.mailtrap.io",
     port: 2525,
-    secure: false,
     auth: {
         user: "306c14ea893372",
         pass: "fd123a07a02b7e",
@@ -16,11 +15,25 @@ const requestHandlerSendEmail = async (req, res) => {
     }
 
     if (req.method === "POST") {
+        console.log("in post !");
         try {
+            console.log("До верификации");
             const userData = req.body;
-            await transporter.verify();
-            console.log("Server is ready to take our messages");
+            const transportVerifier = (error, success) => {
+                if (error) {
+                    console.log("Transport failure:", error);
+                    return error;
+                }
+                console.log("Success =", success); //This gets asynchronously printed
+                return success;
+            };
+            const validTransporter = await transporter.verify(
+                transportVerifier
+            );
 
+            console.log("valid = ", validTransporter);
+            console.log("Server is ready to take our messages");
+            console.log("После верификации");
             // Отправка email
             await transporter.sendMail({
                 from: "mira-dev@mail.ru",
@@ -28,6 +41,7 @@ const requestHandlerSendEmail = async (req, res) => {
                 subject: "Новый клиент!",
                 text: `Имя: ${userData.name} Номер: ${userData.tel} Email: ${userData.email} `,
             });
+            console.log("После отправки мэила");
 
             res.status(200).json({
                 success: true,
