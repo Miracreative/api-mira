@@ -375,7 +375,7 @@ const uploadOneImageForPost = async (req, res) => {
             return res.status(200).json({
                 success: 1,
                 file: {
-                    url: newImageName,
+                    url: `https://api.mirabrand.ru/uploads/posts/${newImageName}`,
                 },
             });
         }
