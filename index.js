@@ -50,6 +50,12 @@ app.delete("/api/db/posts/:slug", postsController.deletePostById);
 app.get("/api/db/posts/:slug", postsController.getOnePostBySlug);
 app.get("/api/db/categories", categoriesController.getAllCategories);
 
+app.post(
+    "/api/upload-image",
+    upload.single("image"),
+    postsController.uploadOneImageForPost
+);
+
 // Обработчик ошибок 404
 
 app.use((req, res) => {
