@@ -1,11 +1,14 @@
 const nodemailer = require("nodemailer");
+const dotenv = require("dotenv");
+dotenv.config();
 
 const transporter = nodemailer.createTransport({
-    host: "sandbox.smtp.mailtrap.io",
-    port: 2525,
+    host: "smtp.yandex.ru",
+    port: 465,
+    secure: true,
     auth: {
-        user: "306c14ea893372",
-        pass: "fd123a07a02b7e",
+        user: process.env.AUTH_MAIL_USER,
+        pass: process.env.AUTH_MAIL_PASS,
     },
 });
 
@@ -31,17 +34,14 @@ const requestHandlerSendEmail = async (req, res) => {
                 transportVerifier
             );
 
-            console.log("valid = ", validTransporter);
             console.log("Server is ready to take our messages");
-            console.log("После верификации");
             // Отправка email
             await transporter.sendMail({
-                from: "mira-dev@mail.ru",
-                to: "79105871051@yandex.ru",
+                from: "sgedexpo@yandex.ru",
+                to: "sgedexpo@yandex.ru",
                 subject: "Новый клиент!",
                 text: `Имя: ${userData.name} Номер: ${userData.tel} Email: ${userData.email} `,
             });
-            console.log("После отправки мэила");
 
             res.status(200).json({
                 success: true,

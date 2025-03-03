@@ -349,10 +349,44 @@ const deletePostById = async (req, res) => {
     }
 };
 
+const uploadOneImageForPost = async (req, res) => {
+    const image = req.file;
+    const originalImageNameWithoutExtension = image.originalname
+        .split(".")
+        .slice(0, -1)
+        .join("");
+    const newImageName =
+        originalImageNameWithoutExtension +
+        Date.now() +
+        path.extname(image.originalname);
+
+    if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir);
+    }
+
+    fs.writeFile(
+        path.join("uploads/posts", newImageName),
+        image.buffer,
+        (err) => {
+            if (err) {
+                console.log("error", err);
+                return res.status(500).send("Error saving file.");
+            }
+            return res.status(200).json({
+                success: 1,
+                file: {
+                    url: newImageName,
+                },
+            });
+        }
+    );
+};
+
 module.exports = {
     setNewPost,
     getAllPosts,
     getOnePostBySlug,
     updatePostBySlug,
     deletePostById,
+    uploadOneImageForPost,
 };
