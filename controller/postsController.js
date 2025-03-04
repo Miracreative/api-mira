@@ -1,10 +1,10 @@
 const { db } = require("../db/index");
 const fs = require("fs");
 const path = require("path");
-const POSTS_COLLECTION = "posts";
 const { createSlug } = require("../utils/create-slug");
 const { ObjectId } = require("mongodb");
 
+const POSTS_COLLECTION = "posts";
 const uploadDir = "uploads/posts";
 
 const setNewPost = async (req, res) => {
@@ -12,7 +12,7 @@ const setNewPost = async (req, res) => {
     const image = req.file;
 
     if (!author || !category || !content || !title || !subtitle || !image) {
-        res.status(400).send("All fields required");
+        res.status(400).send("Все поля обязательны");
         return;
     }
 
@@ -20,10 +20,22 @@ const setNewPost = async (req, res) => {
         .split(".")
         .slice(0, -1)
         .join("");
+
     const newImageName =
         originalImageNameWithoutExtension +
         Date.now() +
         path.extname(image.originalname);
+
+    const arrayContent = JSON.parse(content);
+    const imagesInContent = arrayContent.blocks
+        .map((block) => {
+            if (block.type === "image") {
+                const url = block.data.file.url;
+                const name = url.split("/").pop();
+                return name;
+            }
+        })
+        .filter((el) => el != null);
 
     if (!fs.existsSync(uploadDir)) {
         fs.mkdirSync(uploadDir);
@@ -53,10 +65,11 @@ const setNewPost = async (req, res) => {
                 id: new ObjectId(String(category)),
             },
             content: content,
-            image: newImageName,
+            titleImage: newImageName,
+            images: imagesInContent,
             slug: createSlug(title),
         });
-        res.status(200).send("Post added");
+        res.status(200).send("Пост добавлен");
     } catch (error) {
         console.error(`Error while accessing the database: ${error}`);
         fs.unlink(path.join("uploads/posts", newImageName), (err) => {
@@ -164,6 +177,7 @@ const getOnePostBySlug = async (req, res) => {
             },
         ]);
         const onePost = await onePostCursor.toArray();
+        console.log("onePost", onePost);
         if (onePost.length === 1) {
             res.status(200).json(onePost);
         } else {
@@ -178,58 +192,109 @@ const getOnePostBySlug = async (req, res) => {
 const updatePostBySlug = async (req, res) => {
     const { slug } = req.params;
     const { author, category, content, title, subtitle } = req.body;
-    const image = req.file;
-    let errorIO = false;
-    const post = await db.collection(POSTS_COLLECTION).findOne({ slug: slug });
-    if (!post) {
-        res.status(404).send("Post with this slug does not exist");
+    const newTitleImage = req.file;
+
+    const postForUpdate = await db
+        .collection(POSTS_COLLECTION)
+        .findOne({ slug: slug });
+
+    if (!postForUpdate) {
+        res.status(404).send("Такой пост не найден");
         return;
     }
+    const newImagesInContent = JSON.parse(content)
+        .blocks.map((block) => {
+            if (block.type === "image") {
+                const url = block.data.file.url;
+                const name = url.split("/").pop();
+                return name;
+            }
+        })
+        .filter((el) => el != null);
 
-    let originalImageNameWithoutExtension;
-    let newImageName;
-    const oldImageNameToDelete = post.image;
+    const oldImagesInContent = JSON.parse(postForUpdate.content)
+        .blocks.map((block) => {
+            if (block.type === "image") {
+                const url = block.data.file.url;
+                const name = url.split("/").pop();
+                return name;
+            }
+        })
+        .filter((el) => el != null);
 
-    if (image) {
-        originalImageNameWithoutExtension = image?.originalname
-            .split(".")
-            .slice(0, -1)
-            .join("");
+    const imagesForDelete = [];
 
-        newImageName =
-            originalImageNameWithoutExtension +
-            Date.now() +
-            path.extname(image?.originalname);
-
-        if (!fs.existsSync(uploadDir)) {
-            fs.mkdirSync(uploadDir);
+    oldImagesInContent.forEach((image) => {
+        if (!newImagesInContent.includes(image)) {
+            imagesForDelete.push(image);
         }
-        fs.writeFile(
-            path.join("uploads/posts", newImageName),
-            image.buffer,
-            (err) => {
+    });
+
+    let newImageNameWithoutExtension;
+    let newTitleImageName;
+
+    if (imagesForDelete.length > 0) {
+        for (let image of imagesForDelete) {
+            const filePath = path.join("uploads/posts", image);
+            fs.unlink(filePath, (err) => {
                 if (err) {
-                    console.log("Error while write file", err);
-                    res.status(500).send("Server error");
-                    errorIO = true;
-                    return;
+                    console.log("error", err);
+                    return res.status(500).send("Error deleting file.");
                 }
+            });
+        }
+    }
+    if (newTitleImage) {
+        try {
+            const oldTitleImageNameToDelete = postForUpdate.titleImage;
+            newImageNameWithoutExtension = newTitleImage?.originalname
+                .split(".")
+                .slice(0, -1)
+                .join("");
+
+            newTitleImageName =
+                newImageNameWithoutExtension +
+                Date.now() +
+                path.extname(newTitleImage?.originalname);
+
+            if (!fs.existsSync(uploadDir)) {
+                fs.mkdirSync(uploadDir);
             }
-        );
-        fs.unlink(path.join("uploads/posts", oldImageNameToDelete), (err) => {
-            if (err) {
-                errorIO = true;
-                console.log("errorIO!!!", errorIO);
-                console.log("Error while deleting old image", err);
-                res.status(500).send("Server error");
-                fs.unlink(path.join("uploads/posts", newImageName), (err) => {
-                    errorIO = true;
+            fs.writeFile(
+                path.join("uploads/posts", newTitleImageName),
+                newTitleImage.buffer,
+                (err) => {
                     if (err) {
-                        console.log("Error while deleting old image 2", err);
+                        console.log("Error while write file", err);
+                        res.status(500).send("Server error");
+                        return;
                     }
-                });
-            }
-        });
+                }
+            );
+            fs.unlink(
+                path.join("uploads/posts", oldTitleImageNameToDelete),
+                (err) => {
+                    if (err) {
+                        console.log("Error while deleting old image", err);
+                        res.status(500).send("Server error");
+                        fs.unlink(
+                            path.join("uploads/posts", newTitleImageName),
+                            (err) => {
+                                errorIO = true;
+                                if (err) {
+                                    console.log(
+                                        "Error while deleting old image 2",
+                                        err
+                                    );
+                                }
+                            }
+                        );
+                    }
+                }
+            );
+        } catch (error) {
+            console.log("error: ", error);
+        }
     }
 
     try {
@@ -262,11 +327,11 @@ const updatePostBySlug = async (req, res) => {
             updateData.subTitle = subtitle;
         }
 
-        if (image) {
-            updateData.image = newImageName;
+        if (newTitleImage) {
+            updateData.titleImage = newTitleImageName;
         }
 
-        const updatedPost = await db
+        await db
             .collection(POSTS_COLLECTION)
             .findOneAndUpdate(
                 { slug },
@@ -274,70 +339,52 @@ const updatePostBySlug = async (req, res) => {
                 { returnDocument: "after" }
             );
 
-        res.status(200).json(updatedPost.value);
+        res.status(200).send("Пост успешно обновлен");
     } catch (error) {
         console.error("Error updating post:", error);
-        res.status(500).json({ error: "Internal Server Error" });
+        res.status(500).send("Ошибка при обновлении данных");
     }
 };
 
 const deletePostById = async (req, res) => {
     const { slug } = req.params;
-    // УБРАТЬ АГРЕГАЦИЮ
-    const onePostCursor = db.collection(POSTS_COLLECTION).aggregate([
-        {
-            $match: { slug: slug },
-        },
-        {
-            $lookup: {
-                from: "authors",
-                localField: "author.id",
-                foreignField: "_id",
-                as: "authorDetails",
-            },
-        },
-        {
-            $lookup: {
-                from: "categories", // Коллекция категорий
-                localField: "category.id", // Поле с ID категории в посте
-                foreignField: "_id", // Поле _id в коллекции категорий
-                as: "categoryDetails", // Название нового поля
-            },
-        },
-        // Разворачиваем автора
-        {
-            $unwind: {
-                path: "$authorDetails",
-                preserveNullAndEmptyArrays: true,
-            },
-        },
-        // Разворачиваем категорию
-        {
-            $unwind: {
-                path: "$categoryDetails",
-                preserveNullAndEmptyArrays: true,
-            },
-        },
-        // Фильтрация полей
-        {
-            $project: {
-                author: 0, // Убираем ссылку автора
-                category: 0,
-            },
-        },
-    ]);
-    const onePost = await onePostCursor.toArray();
-    const imageNameToDelete = onePost[0]?.image;
-    console.log("onePost", onePost);
+
+    const deletedPost = await db
+        .collection(POSTS_COLLECTION)
+        .findOneAndDelete({ slug: slug });
+
+    if (!deletedPost) {
+        return res.status(404).send("Пост не найден");
+    }
+
+    const imageNameToDelete = deletedPost?.titleImage;
+    const imagesInContentToDelete = JSON.parse(deletedPost?.content)
+        ?.blocks.map((block) => {
+            if (block.type === "image") {
+                const url = block.data.file.url;
+                const name = url.split("/").pop();
+                return name;
+            }
+        })
+        .filter((el) => el != null);
+
+    console.log("post", deletedPost);
     console.log("imageNameToDelete", imageNameToDelete);
-    console.log("slug", slug);
+    console.log("imagesInContentToDelete", imagesInContentToDelete);
 
-    // const post = await db
-    //     .collection(POSTS_COLLECTION)
-    //     .deleteOne({ slug: slug });
-
-    if (post.deletedCount === 1) {
+    if (deletedPost) {
         console.log("Delete from mongo success");
+        if (imagesInContentToDelete.length > 0) {
+            for (let image of imagesInContentToDelete) {
+                const filePath = path.join("uploads/posts", image);
+                fs.unlink(filePath, (err) => {
+                    if (err) {
+                        console.log("error", err);
+                        return res.status(500).send("Error deleting file.");
+                    }
+                });
+            }
+        }
         const filePath = path.join("uploads/posts", imageNameToDelete);
         fs.unlink(filePath, (err) => {
             if (err) {
