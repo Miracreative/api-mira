@@ -37,8 +37,8 @@ app.post("/api/send-email/", requestHandlerSendEmail);
 // API для работы с авторами и постами
 app.get("/api/db/authors", authorsController.getAllAuthors);
 app.get("/api/db/authors/", authorsController.getAllAuthors);
-app.get("/api/db/posts", postsController.getAllPosts);
-app.get("/api/db/posts/", postsController.getAllPosts);
+app.get("/api/db/posts", postsController.getPosts);
+app.get("/api/db/posts/", postsController.getPosts);
 app.post("/api/db/posts", upload.single("image"), postsController.setNewPost);
 app.post("/api/db/posts/", upload.single("image"), postsController.setNewPost);
 app.put(
