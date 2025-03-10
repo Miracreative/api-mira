@@ -81,7 +81,16 @@ const setNewPost = async (req, res) => {
     }
 };
 
-const getAllPosts = async (req, res) => {
+const getPosts = async (req, res) => {
+    const { skip, category, limit: limitFromUser } = req.query;
+    const defaultLimit = 12;
+    const actualLimit = limitFromUser ? Number(limitFromUser) : defaultLimit;
+    const filter = {};
+
+    if (category !== "null" && category !== undefined && category !== null) {
+        filter["categoryDetails.name"] = category; // Фильтрация по имени категории
+    }
+
     try {
         const cursorPosts = db.collection(POSTS_COLLECTION).aggregate([
             {
@@ -94,37 +103,65 @@ const getAllPosts = async (req, res) => {
             },
             {
                 $lookup: {
-                    from: "categories", // Коллекция категорий
-                    localField: "category.id", // Поле с ID категории в посте
-                    foreignField: "_id", // Поле _id в коллекции категорий
-                    as: "categoryDetails", // Название нового поля
+                    from: "categories",
+                    localField: "category.id",
+                    foreignField: "_id",
+                    as: "categoryDetails",
                 },
             },
-            // Разворачиваем автора
             {
                 $unwind: {
                     path: "$authorDetails",
                     preserveNullAndEmptyArrays: true,
                 },
             },
-            // Разворачиваем категорию
             {
                 $unwind: {
                     path: "$categoryDetails",
                     preserveNullAndEmptyArrays: true,
                 },
             },
-            // Фильтрация полей
             {
                 $project: {
-                    author: 0, // Убираем ссылку автора
+                    author: 0,
                     category: 0,
                 },
             },
+            {
+                $match: filter,
+            },
+            {
+                $facet: {
+                    posts: [
+                        {
+                            $skip: Number(skip) > 0 ? skip * actualLimit : 0,
+                        },
+                        {
+                            $limit: actualLimit,
+                        },
+                    ],
+                    count: [{ $count: "total" }],
+                },
+            },
+            {
+                $project: {
+                    posts: 1,
+                    count: { $arrayElemAt: ["$count.total", 0] },
+                },
+            },
         ]);
+
         const allPosts = await cursorPosts.toArray();
-        // console.log("all ", allPosts);
-        res.status(200).json(allPosts);
+
+        const isMore =
+            allPosts[0].count > Number(skip) * actualLimit + actualLimit;
+
+        const resultObject = {
+            isMore: isMore,
+            posts: allPosts[0].posts,
+        };
+
+        res.status(200).json(resultObject);
     } catch (error) {
         console.error("Error fetching posts:", error);
         res.status(500).json({ error: "Internal Server Error" });
@@ -431,7 +468,7 @@ const uploadOneImageForPost = async (req, res) => {
 
 module.exports = {
     setNewPost,
-    getAllPosts,
+    getPosts,
     getOnePostBySlug,
     updatePostBySlug,
     deletePostById,
