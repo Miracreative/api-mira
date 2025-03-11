@@ -399,8 +399,7 @@ const deletePostById = async (req, res) => {
         ?.blocks.map((block) => {
             if (block.type === "image") {
                 const url = block.data.file.url;
-                const name = url.split("/").pop();
-                return name;
+                return url.split("/").pop();
             }
         })
         .filter((el) => el != null);
@@ -409,27 +408,41 @@ const deletePostById = async (req, res) => {
     console.log("imageNameToDelete", imageNameToDelete);
     console.log("imagesInContentToDelete", imagesInContentToDelete);
 
-    if (deletedPost) {
-        console.log("Delete from mongo success");
-        if (imagesInContentToDelete.length > 0) {
-            for (let image of imagesInContentToDelete) {
-                const filePath = path.join("uploads/posts", image);
-                fs.unlink(filePath, (err) => {
-                    if (err) {
-                        console.log("error", err);
-                        return res.status(500).send("Error deleting file.");
-                    }
-                });
+    try {
+        console.log("Delete from MongoDB success");
+
+        for (let image of imagesInContentToDelete) {
+            const filePath = path.join("uploads/posts", image);
+            try {
+                await fs.promises.unlink(filePath);
+                console.log(`Deleted file: ${filePath}`);
+            } catch (err) {
+                if (err.code !== "ENOENT") {
+                    console.error(`Error deleting file ${filePath}:`, err);
+                } else {
+                    console.warn(`File not found, skipping: ${filePath}`);
+                }
             }
         }
-        const filePath = path.join("uploads/posts", imageNameToDelete);
-        fs.unlink(filePath, (err) => {
-            if (err) {
-                console.log("error", err);
-                return res.status(500).send("Error deleting file.");
+
+        if (imageNameToDelete) {
+            const filePath = path.join("uploads/posts", imageNameToDelete);
+            try {
+                await fs.promises.unlink(filePath);
+                console.log(`Deleted file: ${filePath}`);
+            } catch (err) {
+                if (err.code !== "ENOENT") {
+                    console.error(`Error deleting file ${filePath}:`, err);
+                } else {
+                    console.warn(`File not found, skipping: ${filePath}`);
+                }
             }
-        });
+        }
+
         res.status(200).send("Post Deleted");
+    } catch (error) {
+        console.error("Error deleting post:", error);
+        res.status(500).send("Internal Server Error");
     }
 };
 
