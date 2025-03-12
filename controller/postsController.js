@@ -131,6 +131,9 @@ const getPosts = async (req, res) => {
                 $match: filter,
             },
             {
+                $sort: { _id: -1 }, // Сортируем от новых к старым
+            },
+            {
                 $facet: {
                     posts: [
                         {
