@@ -39,6 +39,9 @@ app.get("/api/db/authors", authorsController.getAllAuthors);
 app.get("/api/db/authors/", authorsController.getAllAuthors);
 app.get("/api/db/posts", postsController.getPosts);
 app.get("/api/db/posts/", postsController.getPosts);
+app.get("/api/db/draft-posts", postsController.getDraftPosts);
+app.get("/api/db/draft-posts/", postsController.getDraftPosts);
+
 app.post("/api/db/posts", upload.single("image"), postsController.setNewPost);
 app.post("/api/db/posts/", upload.single("image"), postsController.setNewPost);
 app.put(
@@ -46,8 +49,10 @@ app.put(
     upload.single("image"),
     postsController.updatePostBySlug
 );
+app.post("/api/db/draft-posts/:slug", postsController.publishDraftById);
+
 app.delete("/api/db/posts/:slug", postsController.deletePostById);
-app.get("/api/db/posts/:slug", postsController.getOnePostBySlug);
+app.get("/api/db/posts/:slug", postsController.getPostBySlug);
 app.get("/api/db/categories", categoriesController.getAllCategories);
 
 app.post(
@@ -55,6 +60,8 @@ app.post(
     upload.single("image"),
     postsController.uploadOneImageForPost
 );
+
+app.post("/api/db/posts/:slug/draft", postsController.movePostToDrafts);
 
 // Обработчик ошибок 404
 

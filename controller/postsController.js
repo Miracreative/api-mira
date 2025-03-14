@@ -5,12 +5,65 @@ const { createSlug } = require("../utils/create-slug");
 const { ObjectId } = require("mongodb");
 
 const POSTS_COLLECTION = "posts";
+const DRAFT_POSTS_COLLECTION = "draftPosts";
 const uploadDir = "uploads/posts";
+
+const getDraftPosts = async (req, res) => {
+    try {
+        const cursorPosts = db.collection(DRAFT_POSTS_COLLECTION).aggregate([
+            {
+                $lookup: {
+                    from: "authors",
+                    localField: "author.id",
+                    foreignField: "_id",
+                    as: "authorDetails",
+                },
+            },
+            {
+                $lookup: {
+                    from: "categories",
+                    localField: "category.id",
+                    foreignField: "_id",
+                    as: "categoryDetails",
+                },
+            },
+            {
+                $unwind: {
+                    path: "$authorDetails",
+                    preserveNullAndEmptyArrays: true,
+                },
+            },
+            {
+                $unwind: {
+                    path: "$categoryDetails",
+                    preserveNullAndEmptyArrays: true,
+                },
+            },
+            {
+                $project: {
+                    author: 0,
+                    category: 0,
+                },
+            },
+            {
+                $sort: { _id: -1 }, // Сортируем от новых к старым
+            },
+        ]);
+
+        const allDraftPosts = await cursorPosts.toArray();
+        res.status(200).json(allDraftPosts);
+    } catch (error) {
+        console.error("Error fetching posts:", error);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+};
 
 const setNewPost = async (req, res) => {
     const { author, category, content, title, subtitle } = req.body;
     const image = req.file;
-
+    const isDraft = req.query.draft === "true";
+    console.log(" req.query", req.query);
+    console.log(" isDraft", isDraft);
     if (!author || !category || !content || !title || !subtitle || !image) {
         res.status(400).send("Все поля обязательны");
         return;
@@ -53,23 +106,27 @@ const setNewPost = async (req, res) => {
     );
 
     try {
-        await db.collection(POSTS_COLLECTION).insertOne({
-            title: title,
-            subTitle: subtitle,
-            author: {
-                ref: "authors",
-                id: new ObjectId(String(author)),
-            },
-            category: {
-                ref: "categories",
-                id: new ObjectId(String(category)),
-            },
-            content: content,
-            titleImage: newImageName,
-            images: imagesInContent,
-            slug: createSlug(title),
-        });
-        res.status(200).send("Пост добавлен");
+        await db
+            .collection(isDraft ? DRAFT_POSTS_COLLECTION : POSTS_COLLECTION)
+            .insertOne({
+                title: title,
+                subTitle: subtitle,
+                author: {
+                    ref: "authors",
+                    id: new ObjectId(String(author)),
+                },
+                category: {
+                    ref: "categories",
+                    id: new ObjectId(String(category)),
+                },
+                content: content,
+                titleImage: newImageName,
+                images: imagesInContent,
+                slug: createSlug(title),
+            });
+        res.status(200).send(
+            isDraft ? "Пост добавлен в черновик" : "Пост добавлен"
+        );
     } catch (error) {
         console.error(`Error while accessing the database: ${error}`);
         fs.unlink(path.join("uploads/posts", newImageName), (err) => {
@@ -171,51 +228,57 @@ const getPosts = async (req, res) => {
     }
 };
 
-const getOnePostBySlug = async (req, res) => {
+const getPostBySlug = async (req, res) => {
     const { slug } = req.params;
+    const { isdraft: isDraft } = req.query;
+    console.log("isDraft", isDraft);
     try {
-        const onePostCursor = db.collection(POSTS_COLLECTION).aggregate([
-            {
-                $match: { slug: slug },
-            },
-            {
-                $lookup: {
-                    from: "authors",
-                    localField: "author.id",
-                    foreignField: "_id",
-                    as: "authorDetails",
+        const onePostCursor = db
+            .collection(
+                isDraft === "true" ? DRAFT_POSTS_COLLECTION : POSTS_COLLECTION
+            )
+            .aggregate([
+                {
+                    $match: { slug: slug },
                 },
-            },
-            {
-                $lookup: {
-                    from: "categories", // Коллекция категорий
-                    localField: "category.id", // Поле с ID категории в посте
-                    foreignField: "_id", // Поле _id в коллекции категорий
-                    as: "categoryDetails", // Название нового поля
+                {
+                    $lookup: {
+                        from: "authors",
+                        localField: "author.id",
+                        foreignField: "_id",
+                        as: "authorDetails",
+                    },
                 },
-            },
-            // Разворачиваем автора
-            {
-                $unwind: {
-                    path: "$authorDetails",
-                    preserveNullAndEmptyArrays: true,
+                {
+                    $lookup: {
+                        from: "categories", // Коллекция категорий
+                        localField: "category.id", // Поле с ID категории в посте
+                        foreignField: "_id", // Поле _id в коллекции категорий
+                        as: "categoryDetails", // Название нового поля
+                    },
                 },
-            },
-            // Разворачиваем категорию
-            {
-                $unwind: {
-                    path: "$categoryDetails",
-                    preserveNullAndEmptyArrays: true,
+                // Разворачиваем автора
+                {
+                    $unwind: {
+                        path: "$authorDetails",
+                        preserveNullAndEmptyArrays: true,
+                    },
                 },
-            },
-            // Фильтрация полей
-            {
-                $project: {
-                    author: 0, // Убираем ссылку автора
-                    category: 0,
+                // Разворачиваем категорию
+                {
+                    $unwind: {
+                        path: "$categoryDetails",
+                        preserveNullAndEmptyArrays: true,
+                    },
                 },
-            },
-        ]);
+                // Фильтрация полей
+                {
+                    $project: {
+                        author: 0, // Убираем ссылку автора
+                        category: 0,
+                    },
+                },
+            ]);
         const onePost = await onePostCursor.toArray();
         console.log("onePost", onePost);
         if (onePost.length === 1) {
@@ -233,9 +296,10 @@ const updatePostBySlug = async (req, res) => {
     const { slug } = req.params;
     const { author, category, content, title, subtitle } = req.body;
     const newTitleImage = req.file;
-
+    const isDraft = req.query.draft === "true";
+    console.log("isDraft in updatepost", isDraft);
     const postForUpdate = await db
-        .collection(POSTS_COLLECTION)
+        .collection(isDraft ? DRAFT_POSTS_COLLECTION : POSTS_COLLECTION)
         .findOne({ slug: slug });
 
     if (!postForUpdate) {
@@ -371,15 +435,20 @@ const updatePostBySlug = async (req, res) => {
             updateData.titleImage = newTitleImageName;
         }
 
-        await db
-            .collection(POSTS_COLLECTION)
-            .findOneAndUpdate(
-                { slug },
-                { $set: updateData },
-                { returnDocument: "after" }
-            );
-
-        res.status(200).send("Пост успешно обновлен");
+        try {
+            await db
+                .collection(isDraft ? DRAFT_POSTS_COLLECTION : POSTS_COLLECTION)
+                .findOneAndUpdate(
+                    { slug },
+                    { $set: updateData },
+                    { returnDocument: "after" }
+                );
+        } catch (error) {
+            console.log("ошибка обновления", error);
+        }
+        res.status(200).send(
+            `${isDraft ? "Черновик" : "Пост"} успешно обновлен`
+        );
     } catch (error) {
         console.error("Error updating post:", error);
         res.status(500).send("Ошибка при обновлении данных");
@@ -388,13 +457,16 @@ const updatePostBySlug = async (req, res) => {
 
 const deletePostById = async (req, res) => {
     const { slug } = req.params;
+    const isDraft = req.query.draft === "true";
 
     const deletedPost = await db
-        .collection(POSTS_COLLECTION)
+        .collection(isDraft ? DRAFT_POSTS_COLLECTION : POSTS_COLLECTION)
         .findOneAndDelete({ slug: slug });
 
     if (!deletedPost) {
-        return res.status(404).send("Пост не найден");
+        return res
+            .status(404)
+            .send(`${isDraft ? "Черновик" : "Пост"} не найден`);
     }
 
     const imageNameToDelete = deletedPost?.titleImage;
@@ -442,10 +514,10 @@ const deletePostById = async (req, res) => {
             }
         }
 
-        res.status(200).send("Post Deleted");
+        res.status(200).send(`${isDraft ? "Черновик " : "Пост "} удалён`);
     } catch (error) {
         console.error("Error deleting post:", error);
-        res.status(500).send("Internal Server Error");
+        res.status(500).send("Ошибка на сервере");
     }
 };
 
@@ -482,11 +554,82 @@ const uploadOneImageForPost = async (req, res) => {
     );
 };
 
+const publishDraftById = async (req, res) => {
+    const { slug } = req.params;
+    try {
+        const draft = await db
+            .collection(DRAFT_POSTS_COLLECTION)
+            .findOne({ slug: slug });
+
+        if (!draft) {
+            return res.status(404).send(`Черновик не найден`);
+        }
+        const post = await db.collection(POSTS_COLLECTION).insertOne({
+            title: draft.title,
+            subTitle: draft.subTitle,
+            author: draft.author,
+            category: draft.category,
+            content: draft.content,
+            titleImage: draft.titleImage,
+            images: draft.images,
+            slug: draft.slug,
+        });
+
+        if (post) {
+            await db
+                .collection(DRAFT_POSTS_COLLECTION)
+                .deleteOne({ slug: slug });
+            return res.status(200).send(`Черновик успешно опубликован`);
+        }
+    } catch (error) {
+        console.log("Error", error);
+        return res.status(500).send(error);
+    }
+
+    console.log("draft", draft);
+};
+
+const movePostToDrafts = async (req, res) => {
+    const { slug } = req.params;
+    const postToDraft = await db
+        .collection(POSTS_COLLECTION)
+        .findOne({ slug: slug });
+
+    if (!postToDraft) {
+        return res.status(404).send("Такой пост не найден");
+    }
+    const savedPost = await db.collection(DRAFT_POSTS_COLLECTION).insertOne({
+        title: postToDraft.title,
+        subTitle: postToDraft.subTitle,
+        author: postToDraft.author,
+        category: postToDraft.category,
+        content: postToDraft.content,
+        titleImage: postToDraft.titleImage,
+        images: postToDraft.images,
+        slug: postToDraft.slug,
+    });
+    if (!savedPost) {
+        return res.status(500).send("Ошибка сохранения в черновики");
+    } else {
+        const deletedPost = await db.collection(POSTS_COLLECTION).deleteOne({
+            slug: slug,
+        });
+        if (deletedPost.deletedCount !== 1) {
+            res.status(500).send("Ошибка удаления");
+        } else {
+            res.status(200).send("Пост успешон перемещён в черновики");
+        }
+    }
+};
+
 module.exports = {
     setNewPost,
     getPosts,
-    getOnePostBySlug,
+    getPostBySlug,
     updatePostBySlug,
     deletePostById,
     uploadOneImageForPost,
+    getDraftPosts,
+    publishDraftById,
+    movePostToDrafts,
 };
