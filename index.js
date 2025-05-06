@@ -7,7 +7,12 @@ const authorsController = require("./controller/authorsController");
 const postsController = require("./controller/postsController");
 const categoriesController = require("./controller/categoriesController");
 var multer = require("multer");
-let upload = multer();
+let upload = multer({
+    limits: {
+        fieldNameSize: 104857600,
+        fieldSize: 104857600,
+    },
+});
 const app = express();
 
 const setHeaders = (req, res, next) => {
